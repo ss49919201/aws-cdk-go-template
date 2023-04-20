@@ -1,39 +1,64 @@
 package main
 
 import (
+	"os"
+
 	"github.com/aws/aws-cdk-go/awscdk/v2"
-	// "github.com/aws/aws-cdk-go/awscdk/v2/awssqs"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awsec2"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awsrds"
 	"github.com/aws/constructs-go/constructs/v10"
 	"github.com/aws/jsii-runtime-go"
 )
 
-type RdsStackProps struct {
+type RDSStackProps struct {
 	awscdk.StackProps
 }
 
-func NewRdsStack(scope constructs.Construct, id string, props *RdsStackProps) awscdk.Stack {
+func NewRDSStack(scope constructs.Construct, id string, props *RDSStackProps) awscdk.Stack {
 	var sprops awscdk.StackProps
 	if props != nil {
 		sprops = props.StackProps
 	}
 	stack := awscdk.NewStack(scope, &id, &sprops)
+	vpc := awsec2.NewVpc(stack, jsii.String("MyVpc"), &awsec2.VpcProps{
+		MaxAzs: jsii.Number(2),
+	})
 
-	// The code that defines your stack goes here
+	securityGroup := awsec2.NewSecurityGroup(stack, jsii.String("RDS-SecurityGroup"), &awsec2.SecurityGroupProps{
+		Vpc:         vpc,
+		Description: jsii.String("Allow connection to RDS"),
+	})
 
-	// example resource
-	// queue := awssqs.NewQueue(stack, jsii.String("RdsQueue"), &awssqs.QueueProps{
-	// 	VisibilityTimeout: awscdk.Duration_Seconds(jsii.Number(300)),
-	// })
+	securityGroup.AddIngressRule(
+		awsec2.Peer_AnyIpv4(),
+		awsec2.Port_Tcp(jsii.Number(3306)),
+		jsii.String("Allow MySQL connection from the internet"),
+		nil,
+	)
+
+	// RDSインスタンスの作成
+	dbInstance := awsrds.NewDatabaseInstance(stack, jsii.String("MyRDS"), &awsrds.DatabaseInstanceProps{
+		Engine: awsrds.DatabaseInstanceEngine_Mysql(&awsrds.MySqlInstanceEngineProps{
+			Version: awsrds.MysqlEngineVersion_VER_8_0(),
+		}),
+		InstanceType:           awsec2.NewInstanceType(jsii.String("t3.micro")),
+		Vpc:                    vpc,
+		SecurityGroups:         &[]awsec2.ISecurityGroup{securityGroup},
+		RemovalPolicy:          awscdk.RemovalPolicy_DESTROY,
+		DeleteAutomatedBackups: jsii.Bool(true),
+	})
+
+	awscdk.NewCfnOutput(stack, jsii.String("DBInstanceEndpoint"), &awscdk.CfnOutputProps{
+		Value: dbInstance.DbInstanceEndpointAddress(),
+	})
 
 	return stack
 }
 
 func main() {
-	defer jsii.Close()
-
 	app := awscdk.NewApp(nil)
 
-	NewRdsStack(app, "RdsStack", &RdsStackProps{
+	NewRDSStack(app, "MyRDSStack", &RDSStackProps{
 		awscdk.StackProps{
 			Env: env(),
 		},
@@ -42,29 +67,9 @@ func main() {
 	app.Synth(nil)
 }
 
-// env determines the AWS environment (account+region) in which our stack is to
-// be deployed. For more information see: https://docs.aws.amazon.com/cdk/latest/guide/environments.html
 func env() *awscdk.Environment {
-	// If unspecified, this stack will be "environment-agnostic".
-	// Account/Region-dependent features and context lookups will not work, but a
-	// single synthesized template can be deployed anywhere.
-	//---------------------------------------------------------------------------
-	return nil
-
-	// Uncomment if you know exactly what account and region you want to deploy
-	// the stack to. This is the recommendation for production stacks.
-	//---------------------------------------------------------------------------
-	// return &awscdk.Environment{
-	//  Account: jsii.String("123456789012"),
-	//  Region:  jsii.String("us-east-1"),
-	// }
-
-	// Uncomment to specialize this stack for the AWS Account and Region that are
-	// implied by the current CLI configuration. This is recommended for dev
-	// stacks.
-	//---------------------------------------------------------------------------
-	// return &awscdk.Environment{
-	//  Account: jsii.String(os.Getenv("CDK_DEFAULT_ACCOUNT")),
-	//  Region:  jsii.String(os.Getenv("CDK_DEFAULT_REGION")),
-	// }
+	return &awscdk.Environment{
+		Region:  jsii.String("ap-northeast-1"),
+		Account: jsii.String(os.Getenv("ACCOUNT")),
+	}
 }
